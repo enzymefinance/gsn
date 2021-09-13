@@ -2,7 +2,7 @@
 import ethWallet from 'ethereumjs-wallet'
 import Web3 from 'web3'
 import sigUtil from 'eth-sig-util'
-import { PrefixedHexString } from 'ethereumjs-tx'
+import { PrefixedHexString } from 'ethereumjs-util'
 
 import { RelayRequest } from '@opengsn/common/dist/EIP712/RelayRequest'
 import { TypedRequestData } from '@opengsn/common/dist/EIP712/TypedRequestData'
@@ -17,8 +17,7 @@ export interface AccountKeypair {
 
 function toAddress (privateKey: PrefixedHexString): Address {
   const wallet = ethWallet.fromPrivateKey(Buffer.from(removeHexPrefix(privateKey), 'hex'))
-  // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
-  return `0x${wallet.getAddress().toString('hex')}`
+  return wallet.getChecksumAddressString()
 }
 
 export class AccountManager {
@@ -107,8 +106,8 @@ export class AccountManager {
     return await getEip712Signature(
       this.web3,
       signedData,
-      this.config.methodSuffix ?? '',
-      this.config.jsonStringifyRequest ?? false
+      this.config.methodSuffix,
+      this.config.jsonStringifyRequest
     )
   }
 

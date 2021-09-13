@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-pragma solidity ^0.7.6;
+pragma solidity ^0.8.0;
 pragma abicoder v2;
 
 import "./TestPaymasterEverythingAccepted.sol";
@@ -103,7 +103,7 @@ contract TestPaymasterConfigurableMisbehavior is TestPaymasterEverythingAccepted
     function withdrawAllBalance() public returns (uint256) {
         require(address(relayHub) != address(0), "relay hub address not set");
         uint256 balance = relayHub.balanceOf(address(this));
-        relayHub.withdraw(balance, address(this));
+        relayHub.withdraw(balance, payable(address(this)));
         return balance;
     }
 
@@ -116,7 +116,7 @@ contract TestPaymasterConfigurableMisbehavior is TestPaymasterEverythingAccepted
         if (expensiveGasLimits) {
             uint sum;
             //memory access is 700gas, so we waste ~50000
-            for ( int i=0; i<60000; i+=700 ) {
+            for ( int i=0; i<100000; i+=700 ) {
                 sum  = sum + limits.acceptanceBudget;
             }
         }

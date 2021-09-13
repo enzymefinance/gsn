@@ -10,10 +10,12 @@ import { HttpWrapper } from '@opengsn/common/dist/HttpWrapper'
 import { HttpClient } from '@opengsn/common/dist/HttpClient'
 import { defaultGsnConfig, GSNConfig } from '@opengsn/provider/dist/GSNConfigurator'
 import { defaultEnvironment } from '@opengsn/common/dist/Environments'
-import { PrefixedHexString } from 'ethereumjs-tx'
+import { PrefixedHexString } from 'ethereumjs-util'
 import { isSameAddress, sleep } from '@opengsn/common/dist/Utils'
 import { RelayHubConfiguration } from '@opengsn/common/dist/types/RelayHubConfiguration'
 import { createServerLogger } from '@opengsn/relay/dist/ServerWinstonLogger'
+import { Address } from '@opengsn/common/dist/types/Aliases'
+import { toBN } from 'web3-utils'
 
 require('source-map-support').install({ errorFormatterForce: true })
 
@@ -34,7 +36,10 @@ export async function startRelay (
 
   const serverWorkDir = '/tmp/gsn/test/server'
 
-  fs.rmdirSync(serverWorkDir, { recursive: true })
+  fs.rmSync(serverWorkDir, {
+    recursive: true,
+    force: true
+  })
   args.push('--workdir', serverWorkDir)
   args.push('--devMode')
   if (options.checkInterval) {
@@ -76,7 +81,7 @@ export async function startRelay (
   // eslint-disable-next-line @typescript-eslint/no-empty-function
   let relaylog = function (_: string): void {}
   if (options.relaylog) {
-    relaylog = (msg: string) => msg.split('\n').forEach(line => console.log(`relay-${proc.pid.toString()}> ${line}`))
+    relaylog = (msg: string) => msg.split('\n').forEach(line => console.log(`relay-${proc.pid!.toString()}> ${line}`))
   }
 
   await new Promise((resolve, reject) => {
@@ -278,6 +283,15 @@ export async function deployHub (
 
 export function configureGSN (partialConfig: Partial<GSNConfig>): GSNConfig {
   return Object.assign({}, defaultGsnConfig, partialConfig) as GSNConfig
+}
+
+export async function emptyBalance (source: Address, target: Address): Promise<void> {
+  const gasPrice = toBN(1e9)
+  const txCost = toBN(defaultEnvironment.mintxgascost).mul(gasPrice)
+  let balance = toBN(await web3.eth.getBalance(source))
+  await web3.eth.sendTransaction({ from: source, to: target, value: balance.sub(txCost), gasPrice, gas: defaultEnvironment.mintxgascost })
+  balance = toBN(await web3.eth.getBalance(source))
+  assert.isTrue(balance.eqn(0))
 }
 
 /**

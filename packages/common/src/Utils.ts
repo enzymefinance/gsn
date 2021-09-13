@@ -3,15 +3,23 @@ import abi from 'web3-eth-abi'
 import web3Utils, { toWei } from 'web3-utils'
 import { EventData } from 'web3-eth-contract'
 import { JsonRpcResponse } from 'web3-core-helpers'
-import { PrefixedHexString, Transaction, TransactionOptions } from 'ethereumjs-tx'
-import { bufferToHex, bufferToInt, ecrecover, pubToAddress, toBuffer, unpadBuffer } from 'ethereumjs-util'
+import { Transaction, TxOptions } from '@ethereumjs/tx'
+import {
+  PrefixedHexString,
+  bufferToHex,
+  ecrecover,
+  pubToAddress,
+  toBuffer,
+  unpadBuffer,
+  bnToUnpaddedBuffer
+} from 'ethereumjs-util'
 
 import { Address } from './types/Aliases'
 
-import { TypedRequestData } from './EIP712/TypedRequestData'
 import chalk from 'chalk'
-import { encode } from 'rlp'
+import { encode, List } from 'rlp'
 import { defaultEnvironment } from './Environments'
+import { EIP712TypedData } from 'eth-sig-util'
 
 export function removeHexPrefix (hex: string): string {
   if (hex == null || typeof hex.replace !== 'function') {
@@ -30,7 +38,7 @@ export function padTo64 (hex: string): string {
 }
 
 export function signatureRSV2Hex (r: BN | Buffer, s: BN | Buffer, v: number): string {
-  return '0x' + padTo64(r.toString('hex')) + padTo64(s.toString('hex')) + v.toString(16)
+  return '0x' + padTo64(r.toString('hex')) + padTo64(s.toString('hex')) + v.toString(16).padStart(2, '0')
 }
 
 export function event2topic (contract: any, names: string[]): any {
@@ -64,19 +72,30 @@ export function decodeRevertReason (revertBytes: PrefixedHexString, throwOnError
   return abi.decodeParameter('string', '0x' + revertBytes.slice(10)) as any
 }
 
+export async function getDefaultMethodSuffix (web3: Web3): Promise<string> {
+  const nodeInfo = await web3.eth.getNodeInfo()
+  // ganache-cli
+  if (nodeInfo.toLowerCase().includes('testrpc')) return ''
+  // hardhat
+  if (nodeInfo.toLowerCase().includes('hardhat')) return '_v4'
+  // all other networks
+  return '_v4'
+}
+
 export async function getEip712Signature (
   web3: Web3,
-  typedRequestData: TypedRequestData,
-  methodSuffix = '',
+  typedRequestData: EIP712TypedData,
+  methodSuffix: string | null = null,
   jsonStringifyRequest = false
 ): Promise<PrefixedHexString> {
   const senderAddress = typedRequestData.message.from
-  let dataToSign: TypedRequestData | string
+  let dataToSign: EIP712TypedData | string
   if (jsonStringifyRequest) {
     dataToSign = JSON.stringify(typedRequestData)
   } else {
     dataToSign = typedRequestData
   }
+  methodSuffix = methodSuffix ?? await getDefaultMethodSuffix(web3)
   return await new Promise((resolve, reject) => {
     let method
     // @ts-ignore (the entire web3 typing is fucked up)
@@ -87,12 +106,13 @@ export async function getEip712Signature (
       // @ts-ignore
       method = web3.currentProvider.send
     }
-    method.bind(web3.currentProvider)({
-      method: 'eth_signTypedData' + methodSuffix,
+    const paramBlock = {
+      method: `eth_signTypedData${methodSuffix}`,
       params: [senderAddress, dataToSign],
-      from: senderAddress,
+      jsonrpc: '2.0',
       id: Date.now()
-    }, (error: Error | string | null, result?: JsonRpcResponse) => {
+    }
+    method.bind(web3.currentProvider)(paramBlock, (error: Error | string | null, result?: JsonRpcResponse) => {
       if (result?.error != null) {
         error = result.error
       }
@@ -236,27 +256,30 @@ export function boolString (bool: boolean): string {
 }
 
 export function getDataAndSignature (tx: Transaction, chainId: number): { data: string, signature: string } {
-  const input = [tx.nonce, tx.gasPrice, tx.gasLimit, tx.to, tx.value, tx.data]
+  if (tx.to == null) {
+    throw new Error('tx.to must be defined')
+  }
+  if (tx.s == null || tx.r == null || tx.v == null) {
+    throw new Error('tx signature must be defined')
+  }
+  const input: List = [bnToUnpaddedBuffer(tx.nonce), bnToUnpaddedBuffer(tx.gasPrice), bnToUnpaddedBuffer(tx.gasLimit), tx.to.toBuffer(), bnToUnpaddedBuffer(tx.value), tx.data]
   input.push(
     toBuffer(chainId),
     unpadBuffer(toBuffer(0)),
     unpadBuffer(toBuffer(0))
   )
-  let vInt = bufferToInt(tx.v)
+  let vInt = tx.v.toNumber()
   if (vInt > 28) {
     vInt -= chainId * 2 + 8
   }
   const data = `0x${encode(input).toString('hex')}`
-  const r = tx.r.toString('hex').padStart(64, '0')
-  const s = tx.s.toString('hex').padStart(64, '0')
-  const v = vInt.toString(16).padStart(2, '0')
-  const signature = `0x${r}${s}${v}`
+  const signature = signatureRSV2Hex(tx.r, tx.s, vInt)
   return {
     data,
     signature
   }
 }
 
-export function signedTransactionToHash (signedTransaction: PrefixedHexString, transactionOptions: TransactionOptions): PrefixedHexString {
-  return bufferToHex(new Transaction(signedTransaction, transactionOptions).hash())
+export function signedTransactionToHash (signedTransaction: PrefixedHexString, transactionOptions: TxOptions): PrefixedHexString {
+  return bufferToHex(Transaction.fromSerializedTx(toBuffer(signedTransaction), transactionOptions).hash())
 }

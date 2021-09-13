@@ -4,7 +4,7 @@ import {
   TestRecipientInstance
 } from '@opengsn/contracts/types/truffle-contracts'
 import BN from 'bn.js'
-import { PrefixedHexString } from 'ethereumjs-tx'
+import { PrefixedHexString } from 'ethereumjs-util'
 import { deployHub } from './TestUtils'
 import { registerForwarderForGsn } from '@opengsn/common/dist/EIP712/ForwarderUtil'
 import { defaultEnvironment } from '@opengsn/common/dist/Environments'
@@ -63,14 +63,15 @@ contract('SampleRecipient', function (accounts) {
     let depositActual = await rhub.balanceOf(paymaster.address)
     assert.equal(deposit.toString(), depositActual.toString())
     const a0BalanceBefore = await web3.eth.getBalance(accounts[0])
-    const gasPrice = 1
+    const gasPrice = new BN(1e9)
     const owner = await paymaster.owner()
     const res = await paymaster.withdrawRelayHubDepositTo(depositActual, owner, {
       from: owner,
       gasPrice: gasPrice
     })
+    const txCost = (new BN(res.receipt.gasUsed)).mul(gasPrice)
     const a0BalanceAfter = await web3.eth.getBalance(accounts[0])
-    const expectedBalanceAfter = new BN(a0BalanceBefore).add(deposit).subn(res.receipt.gasUsed * gasPrice)
+    const expectedBalanceAfter = new BN(a0BalanceBefore).add(deposit).sub(txCost)
     assert.equal(expectedBalanceAfter.toString(), a0BalanceAfter.toString())
     depositActual = await rhub.balanceOf(paymaster.address)
     assert.equal('0', depositActual.toString())
