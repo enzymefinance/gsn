@@ -4,7 +4,6 @@ pragma abicoder v2;
 
 import "@openzeppelin/contracts/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
-import "../utils/FallbacklessTransfer.sol";
 import "./IForwarder.sol";
 
 interface IERC1271 {
@@ -20,12 +19,9 @@ contract AcceptsContractSignaturesForwarder is IForwarder {
     mapping(bytes32 => bool) public typeHashes;
     mapping(bytes32 => bool) public domains;
 
-    // Nonces of senders, used to prevent replay attacks
     mapping(address => uint256) private nonces;
 
-    function getNonce(address from)
-    public view override
-    returns (uint256) {
+    function getNonce(address from) public view override returns (uint256) {
         return nonces[from];
     }
 
@@ -34,17 +30,13 @@ contract AcceptsContractSignaturesForwarder is IForwarder {
         registerRequestTypeInternal(requestType);
     }
 
-    // solhint-disable-next-line no-empty-blocks
-    receive() external payable {}
-
     function verify(
         ForwardRequest calldata req,
         bytes32 domainSeparator,
         bytes32 requestTypeHash,
         bytes calldata suffixData,
-        bytes calldata sig)
-    external override view {
-
+        bytes calldata sig
+    ) external override view {
         _verifyNonce(req);
         _verifySig(req, domainSeparator, requestTypeHash, suffixData, sig);
     }
@@ -55,28 +47,17 @@ contract AcceptsContractSignaturesForwarder is IForwarder {
         bytes32 requestTypeHash,
         bytes calldata suffixData,
         bytes calldata sig
-    )
-    external payable
-    override
-    returns (bool success, bytes memory ret) {
+    ) external override returns (bool success, bytes memory ret) {
         _verifySig(req, domainSeparator, requestTypeHash, suffixData, sig);
         _verifyAndUpdateNonce(req);
 
         require(req.validUntil == 0 || req.validUntil > block.number, "FWD: request expired");
-
-        uint gasForTransfer = 0;
-        if ( req.value != 0 ) {
-            gasForTransfer = 40340; //buffer in case we need to move eth after the transaction.
-        }
         
         bytes memory callData = abi.encodePacked(req.data, req.from);
-        require(gasleft()*63/64 >= req.gas + gasForTransfer, "FWD: insufficient gas");
+        require(gasleft()*63/64 >= req.gas, "FWD: insufficient gas");
+        
         // solhint-disable-next-line avoid-low-level-calls
         (success,ret) = req.to.call{gas: req.gas, value: req.value}(callData);
-        if ( req.value != 0 && address(this).balance>0 ) {
-            // push ETH without triggering recieve/fallback functions
-            new FallbacklessTransfer{value: address(this).balance}(payable(req.from));
-        }
 
         return (success,ret);
     }
@@ -120,9 +101,10 @@ contract AcceptsContractSignaturesForwarder is IForwarder {
     }
 
     function registerRequestTypeInternal(string memory requestType) internal {
-
         bytes32 requestTypehash = keccak256(bytes(requestType));
+
         typeHashes[requestTypehash] = true;
+
         emit RequestTypeRegistered(requestTypehash, requestType);
     }
 
@@ -131,12 +113,11 @@ contract AcceptsContractSignaturesForwarder is IForwarder {
         bytes32 domainSeparator,
         bytes32 requestTypeHash,
         bytes calldata suffixData,
-        bytes calldata sig)
-    internal
-    view
-    {
+        bytes calldata sig
+    ) internal view {
         require(domains[domainSeparator], "FWD: unregistered domain sep.");
         require(typeHashes[requestTypeHash], "FWD: unregistered typehash");
+        
         bytes32 digest = keccak256(abi.encodePacked(
                 "\x19\x01", domainSeparator,
                 keccak256(_getEncoded(req, requestTypeHash, suffixData))
@@ -167,12 +148,7 @@ contract AcceptsContractSignaturesForwarder is IForwarder {
         ForwardRequest calldata req,
         bytes32 requestTypeHash,
         bytes calldata suffixData
-    )
-    public
-    pure
-    returns (
-        bytes memory
-    ) {
+    ) public pure returns (bytes memory) {
         // we use encodePacked since we append suffixData as-is, not as dynamic param.
         // still, we must make sure all first params are encoded as abi.encode()
         // would encode them - as 256-bit-wide params.
