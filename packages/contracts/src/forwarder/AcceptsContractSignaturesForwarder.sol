@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
-pragma solidity ^0.7.6;
+pragma solidity >= 0.7.6;
 pragma abicoder v2;
 
-import "@openzeppelin/contracts/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
 import "./IForwarder.sol";
 
@@ -37,6 +37,7 @@ contract AcceptsContractSignaturesForwarder is IForwarder {
         bytes calldata suffixData,
         bytes calldata sig
     ) external override view {
+        require(req.value == 0, "FWD: forwarder does not allow calls with value");
         _verifyNonce(req);
         _verifySig(req, domainSeparator, requestTypeHash, suffixData, sig);
     }
@@ -47,7 +48,8 @@ contract AcceptsContractSignaturesForwarder is IForwarder {
         bytes32 requestTypeHash,
         bytes calldata suffixData,
         bytes calldata sig
-    ) external override returns (bool success, bytes memory ret) {
+    ) external payable override returns (bool success, bytes memory ret) {
+        require(req.value == 0 && msg.value == 0, "FWD: forwarder does not allow calls with value");
         _verifySig(req, domainSeparator, requestTypeHash, suffixData, sig);
         _verifyAndUpdateNonce(req);
 
@@ -57,7 +59,7 @@ contract AcceptsContractSignaturesForwarder is IForwarder {
         require(gasleft()*63/64 >= req.gas, "FWD: insufficient gas");
         
         // solhint-disable-next-line avoid-low-level-calls
-        (success,ret) = req.to.call{gas: req.gas, value: req.value}(callData);
+        (success,ret) = req.to.call{gas: req.gas}(callData);
 
         return (success,ret);
     }
